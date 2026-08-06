@@ -1,0 +1,137 @@
+import base64
+import hashlib
+import io
+import logging
+import time
+from typing import Any, Dict, List, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+
+class ModelClientError(Exception):
+    pass
+
+
+class ModelClient:
+    """Client for local LLM inference (Ollama or compatible API)."""
+
+    def __init__(
+        self,
+        base_url: str,
+        model: str,
+        vision_model: str,
+        text_model: str,
+        context_window: int = 8192,
+        temperature: float = 0.7,
+        request_timeout: float = 60.0,
+        max_retries: int = 2,
+        retry_delay: float = 2.0,
+    ):
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+        self.vision_model = vision_model
+        self.text_model = text_model
+        self.context_window = context_window
+        self.temperature = temperature
+        self.request_timeout = request_timeout
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self._session = requests.Session()
+
+    def check_health(self) -> bool:
+        """Check if the Ollama server is running and the model is available."""
+        try:
+            resp = self._session.get(f"{self.base_url}/api/tags", timeout=5.0)
+            if resp.status_code != 200:
+                return False
+            models = resp.json().get("models", [])
+            model_names = {m["name"] for m in models}
+            needed = {self.vision_model, self.text_model, self.model}
+            missing = needed - model_names
+            if missing:
+                logger.warning("Missing models: %s. Available: %s", missing, model_names)
+            return len(missing) == 0
+        except Exception as exc:
+            logger.error("Ollama health check failed: %s", exc)
+            return False
+
+    def decide(
+        self,
+        state_text: str,
+        frame_b64: Optional[str] = None,
+        system_prompt: str = "",
+    ) -> str:
+        """Send state to the model and return the raw action string.
+
+        If frame_b64 is provided, uses the vision model. Otherwise, text-only.
+        """
+        model_name = self.vision_model if frame_b64 else self.text_model
+
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        user_content: Any
+        if frame_b64:
+            user_content = [
+                {"type": "text", "text": state_text},
+                {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/png;base64,{frame_b64}",
+                    },
+                },
+            ]
+        else:
+            user_content = state_text
+
+        messages.append({"role": "user", "content": user_content})
+
+        payload = {
+            "model": model_name,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": self.temperature,
+                "num_ctx": self.context_window,
+            },
+        }
+
+        last_exc = None
+        for attempt in range(1, self.max_retries + 1):
+            try:
+                resp = self._session.post(
+                    f"{self.base_url}/api/chat",
+                    json=payload,
+                    timeout=self.request_timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                raw = data.get("message", {}).get("content", "").strip()
+                if not raw:
+                    raise ModelClientError("Model returned empty response")
+                logger.debug("Model raw response: %r", raw)
+                return raw
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Model request attempt %d/%d failed: %s", attempt, self.max_retries, exc)
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay)
+
+        raise ModelClientError(f"All retries failed: {last_exc}")
+
+    def extract_action(self, raw_response: str, valid_actions: List[str]) -> str:
+        """Extract a valid action token from the model's raw response."""
+        upper = raw_response.upper().strip()
+        for action in valid_actions:
+            if action.upper() in upper:
+                return action
+        words = upper.split()
+        for word in words:
+            for action in valid_actions:
+                if action.upper() == word or action.upper().replace("_", " ") == word:
+                    return action
+        logger.warning("Could not extract action from response: %r", raw_response)
+        return "DOWN"

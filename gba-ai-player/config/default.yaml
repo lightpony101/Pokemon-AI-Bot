@@ -1,0 +1,46 @@
+emulator:
+  executable: "mgba-qt"
+  rom_path: ""
+  lua_script: "scripts/mgba_bridge.lua"
+  window_title_pattern: "mGBA"
+  capture_region:
+    x: 0
+    y: 0
+    width: 480
+    height: 320
+  headless: false
+  no_sound: true
+  scale: 3
+
+bridge:
+  host: "127.0.0.1"
+  port: 9999
+  connect_timeout: 10.0
+  read_timeout: 0.05
+  reconnect_delay: 2.0
+  max_reconnect_attempts: 10
+
+model:
+  provider: "ollama"
+  base_url: "http://localhost:11434"
+  model: "llava"
+  vision_model: "llava"
+  text_model: "llama3"
+  context_window: 8192
+  temperature: 0.7
+  request_timeout: 60.0
+  max_retries: 2
+  retry_delay: 2.0
+
+loop:
+  decision_interval: 1.5
+  action_duration_ms: 100
+  stuck_threshold: 6
+  stuck_state_window: 30.0
+  max_consecutive_same: 4
+
+prompt:
+  system_prompt: |
+    You are an expert Pokémon game-playing AI agent. Your objective is to progress through the game,
+    defeat Gym Leaders, collect badges, and ultimately complete the Pokédex or main story.
+    Always explain your reasoning briefly before choosing an action.
