@@ -197,7 +197,7 @@ local MENU_MAP = {[0] = "overworld", [1] = "menu", [2] = "bag", [3] = "pokemon",
 
 function init()
     server = assert(socket.bind(HOST, PORT))
-    server:settimeout(0)
+    pcall(function() server:settimeout(0) end)
     server:setoption("reuseaddr", true)
     emu.message(string.format("GBA AI Bridge: %s:%d", HOST, PORT))
     print(string.format("[GBA Bridge] Listening on %s:%d", HOST, PORT))
@@ -282,7 +282,7 @@ function on_frame()
             client:close()
         end
         client = new_client
-        client:settimeout(READ_TIMEOUT)
+        pcall(function() client:settimeout(READ_TIMEOUT) end)
         emu.message("Python client connected")
     end
 
