@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
-# Setup script for GBA AI Player on Debian/Ubuntu Linux
+# Setup script for GBA AI Player on Nobara Linux (Fedora-based)
+# Nobara is RPM-based and ships with RPM Fusion enabled by default.
 set -euo pipefail
 
-echo "=== GBA AI Player - Linux Setup ==="
+echo "=== GBA AI Player - Nobara Linux Setup ==="
 
 # 1. Install system dependencies
 echo "[1/5] Installing system dependencies..."
-sudo apt update
-sudo apt install -y \
-    python3 python3-pip python3-venv \
+sudo dnf install -y \
+    python3 python3-pip python3-virtualenv \
     mgba-qt \
     x11-utils \
     wget curl git \
-    libgl1 libegl1 libx11-6 libxext6 libxrender1 \
-    ffmpeg
+    mesa-libGL mesa-libEGL libX11 libXext libXrender \
+    ffmpeg \
+    libappindicator-gtk3 \
+    gtk3
 
 # 2. Install Ollama
 echo "[2/5] Installing Ollama..."
@@ -44,6 +46,18 @@ fi
 
 echo ""
 echo "=== Setup Complete ==="
+echo ""
+echo "Nobara-specific notes:"
+echo "  - Nobara ships with RPM Fusion (free + non-free) pre-enabled, so mgba-qt"
+echo "    and ffmpeg are available directly in the repos."
+echo "  - If you are on a Wayland session, mGBA window capture via mss may fall"
+echo "    back to the configured capture_region in config/user.yaml."
+echo "    For best results, either:"
+echo "      a) launch mGBA under XWayland and note its geometry with xwininfo, or"
+echo "      b) set capture_region manually to match your mGBA window position."
+echo "  - On Nobara GameOS or GNOME Gaming Edition, you may need to allow"
+echo "    Ollama through the firewall for local-only access:"
+echo "      sudo firewall-cmd --add-service=ollama --permanent && sudo firewall-cmd --reload"
 echo ""
 echo "Next steps:"
 echo "  1. Place your Pokémon ROM in the project directory"
