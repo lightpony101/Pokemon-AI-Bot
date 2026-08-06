@@ -318,7 +318,6 @@ function cleanup()
     print("[GBA Bridge] Shutdown complete")
 end
 
-event.onframe(on_frame)
-event.onexit(cleanup)
+emu.onframe(on_frame)
 init()
 emu.message("GBA AI Bridge initialized")
