@@ -29,6 +29,8 @@ fi
 
 # 3. Pull required models
 echo "[3/5] Pulling AI models (this may take a while)..."
+echo "  - llava: vision-capable model for screen understanding"
+echo "  - llama3: text model fallback for state-only reasoning"
 ollama pull llava
 ollama pull llama3
 

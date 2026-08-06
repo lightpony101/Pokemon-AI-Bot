@@ -65,10 +65,9 @@ class ModelClient:
     ) -> str:
         """Send state to the model and return the raw action string.
 
-        If frame_b64 is provided, uses the vision model. Otherwise, text-only.
+        If frame_b64 is provided, attempts the vision model first. If the model
+        does not support images, falls back to the text model without the image.
         """
-        model_name = self.vision_model if frame_b64 else self.text_model
-
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -89,19 +88,20 @@ class ModelClient:
 
         messages.append({"role": "user", "content": user_content})
 
-        payload = {
-            "model": model_name,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": self.temperature,
-                "num_ctx": self.context_window,
-            },
-        }
-
         last_exc = None
+        model_name = self.vision_model if frame_b64 else self.text_model
+
         for attempt in range(1, self.max_retries + 1):
             try:
+                payload = {
+                    "model": model_name,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": self.temperature,
+                        "num_ctx": self.context_window,
+                    },
+                }
                 resp = self._session.post(
                     f"{self.base_url}/api/chat",
                     json=payload,
@@ -114,8 +114,26 @@ class ModelClient:
                     raise ModelClientError("Model returned empty response")
                 logger.debug("Model raw response: %r", raw)
                 return raw
+            except ModelClientError:
+                raise
             except Exception as exc:
                 last_exc = exc
+                err_str = str(exc).lower()
+                is_vision_error = (
+                    frame_b64
+                    and model_name == self.vision_model
+                    and ("does not support image input" in err_str or "image" in err_str)
+                )
+                if is_vision_error and attempt < self.max_retries:
+                    logger.warning(
+                        "Vision model '%s' rejected image input (%s). "
+                        "Falling back to text-only model '%s'.",
+                        model_name, exc, self.text_model,
+                    )
+                    model_name = self.text_model
+                    messages[-1]["content"] = state_text
+                    frame_b64 = None
+                    continue
                 logger.warning("Model request attempt %d/%d failed: %s", attempt, self.max_retries, exc)
                 if attempt < self.max_retries:
                     time.sleep(self.retry_delay)
