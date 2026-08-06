@@ -17,10 +17,22 @@ if not emu then
         if val then _emu[name] = val end
     end
 end
+
+-- Non-fatal call: if the emu function is missing, return nil instead of crashing.
 local function emu_call(name, ...)
     local fn = _emu[name]
-    if not fn then error("emu." .. name .. " not available in this mGBA build") end
+    if not fn then return nil end
     return fn(...)
+end
+
+-- Message helper: prefer emu.message, fall back to print so missing on-screen
+-- message support doesn't break the script.
+local function safe_message(text)
+    if _emu.message then
+        _emu.message(text)
+    else
+        print(text)
+    end
 end
 
 local json = {}
@@ -244,7 +256,7 @@ function apply_buttons(button_str)
     end
     for _, btn in ipairs(parts) do
         local ok, err = pcall(function() joypad.set(btn, true) end)
-        if not ok then emu_call("message", "joypad.set error: " .. tostring(err)) end
+        if not ok then safe_message("joypad.set error: " .. tostring(err)) end
     end
     emu_call("frameadvance")
     for _, btn in ipairs(parts) do
@@ -255,7 +267,7 @@ end
 function handle_command(line)
     local ok, cmd = pcall(function() return json.decode(line) end)
     if not ok or type(cmd) ~= "table" then
-        emu_call("message", "Bad JSON from client")
+        safe_message("Bad JSON from client")
         return
     end
     if cmd.type == "action" and cmd.buttons then
@@ -273,7 +285,7 @@ function on_frame()
         if client then client:close() end
         client = new_client
         pcall(function() client:settimeout(READ_TIMEOUT) end)
-        emu_call("message", "Python client connected")
+        safe_message("Python client connected")
     end
 
     if client then
@@ -308,11 +320,11 @@ function init()
     server = assert(socket.bind(HOST, PORT))
     pcall(function() server:settimeout(0) end)
     pcall(function() server:setoption("reuseaddr", true) end)
-    emu_call("message", string.format("GBA AI Bridge: %s:%d", HOST, PORT))
+    safe_message(string.format("GBA AI Bridge: %s:%d", HOST, PORT))
     print(string.format("[GBA Bridge] Listening on %s:%d", HOST, PORT))
 end
 
-emu_call("message", "GBA AI Bridge initializing...")
+safe_message("GBA AI Bridge initializing...")
 init()
 
 while true do
