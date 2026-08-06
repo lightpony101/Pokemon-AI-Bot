@@ -8,6 +8,15 @@
 --
 -- This script includes a minimal JSON serializer so no external library is needed.
 
+-- Compatibility shim: some mGBA versions expose `emu` as a global, others
+-- expose the same functions directly in the global namespace.
+if not emu then
+    emu = {}
+    for _, name in ipairs({"framecount", "message", "frameadvance", "onframe", "onexit"}) do
+        emu[name] = rawget(_G, name)
+    end
+end
+
 local json = {}
 
 -- Minimal JSON encoder
@@ -318,6 +327,10 @@ function cleanup()
     print("[GBA Bridge] Shutdown complete")
 end
 
-emu.onframe(on_frame)
 init()
 emu.message("GBA AI Bridge initialized")
+
+while true do
+    on_frame()
+    emu.frameadvance()
+end
