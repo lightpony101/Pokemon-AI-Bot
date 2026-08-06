@@ -1,24 +1,16 @@
 emulator:
   executable: "mgba-qt"
   rom_path: ""
-  lua_script: "scripts/mgba_bridge.lua"
   window_title_pattern: "mGBA"
   capture_region:
     x: 0
     y: 0
     width: 480
     height: 320
+  action_duration_ms: 100
   headless: false
   no_sound: true
   scale: 3
-
-bridge:
-  host: "127.0.0.1"
-  port: 9999
-  connect_timeout: 10.0
-  read_timeout: 0.05
-  reconnect_delay: 2.0
-  max_reconnect_attempts: 10
 
 model:
   provider: "ollama"
@@ -33,14 +25,32 @@ model:
   retry_delay: 2.0
 
 loop:
-  decision_interval: 1.5
-  action_duration_ms: 100
-  stuck_threshold: 6
+  decision_interval: 2.0
+  stuck_threshold: 8
   stuck_state_window: 30.0
-  max_consecutive_same: 4
+  max_consecutive_same: 5
 
 prompt:
   system_prompt: |
-    You are an expert Pokémon game-playing AI agent. Your objective is to progress through the game,
-    defeat Gym Leaders, collect badges, and ultimately complete the Pokédex or main story.
-    Always explain your reasoning briefly before choosing an action.
+    You are an expert Pokémon game-playing AI agent. You see the game screen and must press keyboard keys to progress.
+    Your goal: defeat Gym Leaders, collect badges, complete the main story.
+
+    KEY MAPPING (mGBA defaults):
+      A button → press A
+      B button → press B
+      Start menu → press START
+      Select menu → press SELECT
+      Move up → press UP
+      Move down → press DOWN
+      Move left → press LEFT
+      Move right → press RIGHT
+
+    RULES:
+    - If you see dialogue text: press A to advance.
+    - If you see a menu: navigate with UP/DOWN, confirm with A, cancel with B.
+    - If you see a battle: choose ATTACK (A), then select a move (UP/DOWN + A).
+    - If you see the overworld and nothing to interact with: walk in a direction (UP/DOWN/LEFT/RIGHT).
+    - If stuck on a wall or repeating the same screen: change direction.
+    - Always explain your choice in one short sentence, then output ONLY the action name on a new line.
+    - Valid actions: A, B, START, SELECT, UP, DOWN, LEFT, RIGHT, UP_A, DOWN_A, LEFT_A, RIGHT_A, UP_B, DOWN_B, LEFT_B, RIGHT_B, UP_START, UP_SELECT
+    - Output format: [reasoning]\nACTION: <action_name>

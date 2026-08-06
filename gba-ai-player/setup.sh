@@ -14,6 +14,8 @@ sudo dnf install -y \
     wget curl git \
     mesa-libGL mesa-libEGL libX11 libXext libXrender \
     ffmpeg \
+    xdotool \
+    wtype \
     libappindicator-gtk3 \
     gtk3
 
@@ -50,6 +52,8 @@ echo ""
 echo "Nobara-specific notes:"
 echo "  - Nobara ships with RPM Fusion (free + non-free) pre-enabled, so mgba-qt"
 echo "    and ffmpeg are available directly in the repos."
+echo "  - xdotool (X11) and wtype (Wayland) are installed for keyboard input."
+echo "    The AI will automatically detect which backend to use."
 echo "  - If you are on a Wayland session, mGBA window capture via mss may fall"
 echo "    back to the configured capture_region in config/user.yaml."
 echo "    For best results, either:"

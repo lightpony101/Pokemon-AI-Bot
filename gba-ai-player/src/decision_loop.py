@@ -137,8 +137,10 @@ class DecisionLoop:
             while self._running:
                 loop_start = time.time()
 
-                # 1. Capture state from bridge (Lua side) and screen
-                bridge_state = self.bridge.read_state()
+                # 1. Capture state from bridge (if available) and screen
+                bridge_state = None
+                if hasattr(self.bridge, "read_state"):
+                    bridge_state = self.bridge.read_state()
                 screen_img = None
                 try:
                     screen_img = self.state_capture.capture_frame()
@@ -163,10 +165,6 @@ class DecisionLoop:
                     elif stuck_key:
                         should_decide = True
                         logger.info("Triggering early decision due to stuck state")
-                    elif state.battle_state != "none":
-                        should_decide = True
-                    elif state.menu_state != "overworld" and self._last_action not in ("A", "START", "SELECT"):
-                        should_decide = True
 
                 if should_decide and state:
                     self._start_inference(state, last_screen)

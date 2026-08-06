@@ -4,16 +4,14 @@
 import logging
 import signal
 import sys
-import time
 from typing import Optional
 
 from src.config import Config, ConfigError
-from src.emulator_bridge import EmulatorBridge, EmulatorBridgeError
+from src.keyboard_bridge import KeyboardBridge, KeyboardBridgeError
 from src.state_capture import StateCapture, ScreenCaptureError
 from src.model_client import ModelClient, ModelClientError
 from src.decision_loop import DecisionLoop
 from src.action_space import ACTIONS
-from src.memory_map import get_memory_map
 
 logger = logging.getLogger("gba_ai_player")
 
@@ -74,16 +72,11 @@ def main(config_path: Optional[str] = None) -> int:
         return 1
 
     emulator_cfg = config["emulator"]
-    bridge_cfg = config["bridge"]
     model_cfg = config["model"]
 
-    bridge = EmulatorBridge(
-        host=bridge_cfg["host"],
-        port=bridge_cfg["port"],
-        connect_timeout=bridge_cfg["connect_timeout"],
-        read_timeout=bridge_cfg["read_timeout"],
-        reconnect_delay=bridge_cfg["reconnect_delay"],
-        max_reconnect_attempts=bridge_cfg["max_reconnect_attempts"],
+    keyboard_bridge = KeyboardBridge(
+        window_title_pattern=emulator_cfg["window_title_pattern"],
+        action_duration_ms=emulator_cfg.get("action_duration_ms", 100),
     )
 
     state_capture = StateCapture(
@@ -107,7 +100,7 @@ def main(config_path: Optional[str] = None) -> int:
         logger.warning("Model health check failed; continuing but inference may fail")
 
     loop = DecisionLoop(
-        bridge=bridge,
+        bridge=keyboard_bridge,
         state_capture=state_capture,
         model_client=model_client,
         action_space=ACTIONS,
@@ -122,18 +115,17 @@ def main(config_path: Optional[str] = None) -> int:
     signal.signal(signal.SIGTERM, handle_signal)
 
     logger.info("=" * 60)
-    logger.info("GBA AI Player")
+    logger.info("GBA AI Player (Keyboard Mode)")
     logger.info("  Emulator: %s", emulator_cfg["executable"])
     logger.info("  Model:    %s / %s", model_cfg["vision_model"], model_cfg["text_model"])
     logger.info("  Actions:  %s", ", ".join(ACTIONS))
     logger.info("=" * 60)
 
     try:
-        bridge.connect()
         state_capture.detect_window()
         loop.run()
-    except EmulatorBridgeError as exc:
-        logger.error("Bridge error: %s", exc)
+    except KeyboardBridgeError as exc:
+        logger.error("Keyboard bridge error: %s", exc)
         return 1
     except ScreenCaptureError as exc:
         logger.error("Screen capture error: %s", exc)
@@ -142,7 +134,7 @@ def main(config_path: Optional[str] = None) -> int:
         logger.error("Model client error: %s", exc)
         return 1
     finally:
-        bridge.close()
+        keyboard_bridge.close()
 
     return 0
 
