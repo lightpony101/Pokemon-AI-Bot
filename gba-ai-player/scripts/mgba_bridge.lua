@@ -8,13 +8,19 @@
 --
 -- This script includes a minimal JSON serializer so no external library is needed.
 
--- Compatibility shim: some mGBA versions expose `emu` as a global, others
--- expose the same functions directly in the global namespace.
+-- ===== Compatibility shim =====
+-- Some mGBA builds expose APIs as globals, others under `emu`.
+local _emu = emu or {}
 if not emu then
-    emu = {}
     for _, name in ipairs({"framecount", "message", "frameadvance", "onframe", "onexit"}) do
-        emu[name] = rawget(_G, name)
+        local val = rawget(_G, name)
+        if val then _emu[name] = val end
     end
+end
+local function emu_call(name, ...)
+    local fn = _emu[name]
+    if not fn then error("emu." .. name .. " not available in this mGBA build") end
+    return fn(...)
 end
 
 local json = {}
@@ -31,7 +37,6 @@ function json.encode(obj)
     elseif t == "string" then
         return '"' .. string.gsub(obj, '["\\]', function(c) return '\\' .. c end) .. '"'
     elseif t == "table" then
-        -- Check if array-like
         local max_index = 0
         local is_array = true
         for k, _ in pairs(obj) do
@@ -61,18 +66,15 @@ function json.encode(obj)
     return "null"
 end
 
--- Minimal JSON decoder (only handles flat-ish objects for commands)
+-- Minimal JSON decoder
 function json.decode(str)
     local idx = 1
     local len = #str
-
-    local skip_ws
-    skip_ws = function()
+    local skip_ws = function()
         while idx <= len and string.find(" \t\n\r", string.sub(str, idx, idx), 1, true) do
             idx = idx + 1
         end
     end
-
     local parse_value
     parse_value = function()
         skip_ws()
@@ -111,9 +113,7 @@ function json.decode(str)
                 local val = parse_value()
                 table.insert(arr, val)
                 skip_ws()
-                if idx <= len and string.sub(str, idx, idx) == ',' then
-                    idx = idx + 1
-                end
+                if idx <= len and string.sub(str, idx, idx) == ',' then idx = idx + 1 end
             end
             if idx <= len and string.sub(str, idx, idx) == ']' then idx = idx + 1 end
             return arr
@@ -129,9 +129,7 @@ function json.decode(str)
                 local val = parse_value()
                 obj[key] = val
                 skip_ws()
-                if idx <= len and string.sub(str, idx, idx) == ',' then
-                    idx = idx + 1
-                end
+                if idx <= len and string.sub(str, idx, idx) == ',' then idx = idx + 1 end
             end
             if idx <= len and string.sub(str, idx, idx) == '}' then idx = idx + 1 end
             return obj
@@ -145,7 +143,6 @@ function json.decode(str)
             idx = idx + 4
             return nil
         else
-            -- number
             local start = idx
             if ch == '-' then idx = idx + 1 end
             while idx <= len and string.find("0123456789", string.sub(str, idx, idx), 1, true) do
@@ -160,7 +157,6 @@ function json.decode(str)
             return tonumber(string.sub(str, start, idx - 1))
         end
     end
-
     local result = parse_value()
     skip_ws()
     return result
@@ -169,8 +165,8 @@ end
 -- ===== Configuration =====
 local HOST = "127.0.0.1"
 local PORT = 9999
-local STATE_INTERVAL = 2 -- frames between state broadcasts
-local READ_TIMEOUT = 0.01 -- non-blocking with short timeout
+local STATE_INTERVAL = 2
+local READ_TIMEOUT = 0.01
 
 local server = nil
 local client = nil
@@ -195,29 +191,26 @@ local FACING_MAP = {[0] = "down", [1] = "up", [2] = "left", [3] = "right"}
 local BATTLE_MAP = {[0] = "none", [1] = "active", [2] = "transition"}
 local MENU_MAP = {[0] = "overworld", [1] = "menu", [2] = "bag", [3] = "pokemon", [4] = "save", [5] = "option", [6] = "battle_menu"}
 
-function init()
-    server = assert(socket.bind(HOST, PORT))
-    pcall(function() server:settimeout(0) end)
-    server:setoption("reuseaddr", true)
-    emu.message(string.format("GBA AI Bridge: %s:%d", HOST, PORT))
-    print(string.format("[GBA Bridge] Listening on %s:%d", HOST, PORT))
+-- ===== Memory reads =====
+local function safe_read(name, fn, default)
+    local ok, val = pcall(fn)
+    if not ok then return default end
+    return val
 end
 
-function read_u8(addr)
-    return memory.readbyte(addr)
+local function read_u8(addr)
+    return safe_read("readbyte_" .. addr, function() return memory.readbyte(addr) end, 0)
 end
-
-function read_u16(addr)
-    return memory.readword(addr)
+local function read_u16(addr)
+    return safe_read("readword_" .. addr, function() return memory.readword(addr) end, 0)
 end
-
-function read_u32(addr)
-    return memory.readlong(addr)
+local function read_u32(addr)
+    return safe_read("readlong_" .. addr, function() return memory.readlong(addr) end, 0)
 end
 
 function read_state()
     local state = {
-        frame = emu.framecount(),
+        frame = emu_call("framecount"),
         map = read_u32(ADDR.current_map),
         x = read_u32(ADDR.player_x),
         y = read_u32(ADDR.player_y),
@@ -228,10 +221,8 @@ function read_state()
         facing = read_u8(ADDR.facing),
         warp = read_u8(ADDR.warp_flag),
     }
-
     state.party_hp = {}
-    local count = state.party_count
-    if count > 6 then count = 6 end
+    local count = math.min(state.party_count or 0, 6)
     for i = 0, count - 1 do
         local hp_addr = ADDR.party_hp + (i * 8)
         local ok, cur, max = pcall(function()
@@ -241,10 +232,10 @@ function read_state()
             state.party_hp[i + 1] = {current = cur, max = max}
         end
     end
-
     return state
 end
 
+-- ===== Input =====
 function apply_buttons(button_str)
     if not button_str or button_str == "" then return end
     local parts = {}
@@ -252,21 +243,21 @@ function apply_buttons(button_str)
         table.insert(parts, string.upper(string.match(part, "^%s*(.-)%s*$")))
     end
     for _, btn in ipairs(parts) do
-        joypad.set(btn, true)
+        local ok, err = pcall(function() joypad.set(btn, true) end)
+        if not ok then emu_call("message", "joypad.set error: " .. tostring(err)) end
     end
-    emu.frameadvance()
+    emu_call("frameadvance")
     for _, btn in ipairs(parts) do
-        joypad.set(btn, false)
+        pcall(function() joypad.set(btn, false) end)
     end
 end
 
 function handle_command(line)
     local ok, cmd = pcall(function() return json.decode(line) end)
     if not ok or type(cmd) ~= "table" then
-        emu.message("Bad JSON from client")
+        emu_call("message", "Bad JSON from client")
         return
     end
-
     if cmd.type == "action" and cmd.buttons then
         apply_buttons(cmd.buttons)
     end
@@ -275,22 +266,20 @@ end
 function on_frame()
     frame_counter = frame_counter + 1
 
-    -- Accept new connections
+    if not server then return end
+
     local new_client, err = server:accept()
     if new_client then
-        if client then
-            client:close()
-        end
+        if client then client:close() end
         client = new_client
         pcall(function() client:settimeout(READ_TIMEOUT) end)
-        emu.message("Python client connected")
+        emu_call("message", "Python client connected")
     end
 
-    -- Read commands from client (non-blocking)
     if client then
         local line, err = client:receive()
         if line == nil and err == "timeout" then
-            -- normal, no data available
+            -- normal
         elseif line == nil then
             client:close()
             client = nil
@@ -299,7 +288,6 @@ function on_frame()
         end
     end
 
-    -- Broadcast state periodically
     if (frame_counter - last_state_sent) >= STATE_INTERVAL then
         last_state_sent = frame_counter
         local state = read_state()
@@ -308,29 +296,26 @@ function on_frame()
             local ok2, err2 = pcall(function()
                 client:send(encoded .. "\n")
             end)
-            if not ok2 then
-                client = nil
-            end
+            if not ok2 then client = nil end
         end
     end
 end
 
-function cleanup()
-    if client then
-        client:close()
-        client = nil
+function init()
+    if not socket then
+        error("socket library not available in this mGBA build")
     end
-    if server then
-        server:close()
-        server = nil
-    end
-    print("[GBA Bridge] Shutdown complete")
+    server = assert(socket.bind(HOST, PORT))
+    pcall(function() server:settimeout(0) end)
+    pcall(function() server:setoption("reuseaddr", true) end)
+    emu_call("message", string.format("GBA AI Bridge: %s:%d", HOST, PORT))
+    print(string.format("[GBA Bridge] Listening on %s:%d", HOST, PORT))
 end
 
+emu_call("message", "GBA AI Bridge initializing...")
 init()
-emu.message("GBA AI Bridge initialized")
 
 while true do
     on_frame()
-    emu.frameadvance()
+    emu_call("frameadvance")
 end
